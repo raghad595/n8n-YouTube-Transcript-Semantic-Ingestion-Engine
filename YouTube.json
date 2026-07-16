@@ -1,0 +1,365 @@
+{
+  "name": "YouTube",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -752,
+        -208
+      ],
+      "id": "a3341c0f-c8c9-455c-8e36-c14a1a25295f",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "resource": "video",
+        "limit": 2,
+        "filters": {},
+        "options": {}
+      },
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        -576,
+        -208
+      ],
+      "id": "9039482d-8325-4236-b881-309b859ac412",
+      "name": "Get many videos",
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "id": "zFMxkYfeI9vIiQ4L",
+          "name": "YouTube account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/youtube/v3/captions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "={{ $json.snippet }}"
+            },
+            {
+              "name": "videoId",
+              "value": "={{ $json.id.videoId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -368,
+        -208
+      ],
+      "id": "73d12bd8-7fae-454c-b5a5-c132fba94a3b",
+      "name": "HTTP Request",
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "id": "zFMxkYfeI9vIiQ4L",
+          "name": "YouTube account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/youtube/v3/captions/ {{ $json.items[0].id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "videoId",
+              "value": "={{ $('Get many videos').item.json.id.videoId }}"
+            },
+            {
+              "name": "part",
+              "value": "={{ $('Get many videos').item.json.snippet }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -192,
+        -208
+      ],
+      "id": "f9c64e95-88b7-4452-88c9-e86524f66efd",
+      "name": "HTTP Request1",
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "id": "zFMxkYfeI9vIiQ4L",
+          "name": "YouTube account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        -208
+      ],
+      "id": "fd7e4c90-16a1-410a-bb45-e527a58ef58c",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "jsonMode": "expressionData",
+        "jsonData": "={{ $json.text }}",
+        "textSplittingMode": "custom",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "startTime",
+                "value": "={{ $json.startTime }}"
+              },
+              {
+                "name": "url",
+                "value": "={{ $json.url }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        624,
+        0
+      ],
+      "id": "2257880f-a80a-4870-9f24-ee562eb7c025",
+      "name": "Default Data Loader"
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "tableName": {
+          "__rl": true,
+          "value": "documents",
+          "mode": "list",
+          "cachedResultName": "documents"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreSupabase",
+      "typeVersion": 1.3,
+      "position": [
+        544,
+        -208
+      ],
+      "id": "94e512d1-1a78-437b-950c-b564b422b4f6",
+      "name": "Supabase Vector Store",
+      "credentials": {
+        "supabaseApi": {
+          "id": "7PGyAjqBe8DbYSCP",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. CONFIGURATION\nconst CHUNK_SIZE = 500; \n\n// Retrieve Video ID safely\n// Ensure 'Get many videos' is the exact name of your YouTube node\nconst videoId = $('Get many videos').item.json.id.videoId;\n\n// 2. Get the input data\nconst rawData = $input.item.json.data;\n\n// 3. Helper variables\nlet chunks = [];\nlet currentChunkText = \"\";\nlet currentChunkStartTime = null;\n\n// --- HELPER FUNCTION ---\nfunction timeToSeconds(timeString) {\n  if (!timeString) return 0;\n  const parts = timeString.split(':'); \n  const hours = parseInt(parts[0], 10);\n  const minutes = parseInt(parts[1], 10);\n  const seconds = parseFloat(parts[2]);\n  return Math.floor((hours * 3600) + (minutes * 60) + seconds);\n}\n\n// 4. Parse the raw string\nconst rawBlocks = rawData.split('\\n\\n');\n\nfor (const block of rawBlocks) {\n  const lines = block.split('\\n');\n  if (lines.length < 2) continue;\n\n  const timeLine = lines[0];\n  const startTime = timeLine.split(',')[0]; \n  const textContent = lines.slice(1).join(' ').trim();\n\n  // 5. Chunking Logic\n  if (currentChunkStartTime === null) {\n    currentChunkStartTime = startTime;\n  }\n\n  // Check if adding this text exceeds the CHUNK_SIZE\n  if ((currentChunkText.length + textContent.length) > CHUNK_SIZE) {\n    \n    // --- FIX: ONLY push if we actually have text accumulated ---\n    if (currentChunkText.length > 0) {\n        const seconds = timeToSeconds(currentChunkStartTime);\n        const videoUrl = `https://www.youtube.com/watch?v=${videoId}&t=${seconds}`;\n\n        chunks.push({\n            startTime: currentChunkStartTime,\n            text: currentChunkText.trim(),\n            url: videoUrl\n        });\n    }\n\n    // Reset for the NEW chunk\n    currentChunkText = textContent + \" \";\n    currentChunkStartTime = startTime; \n    \n  } else {\n    // Append to current chunk\n    const separator = currentChunkText.length > 0 ? \" \" : \"\";\n    currentChunkText += separator + textContent;\n  }\n}\n\n// 6. Push final chunk\nif (currentChunkText.length > 0) {\n  const seconds = timeToSeconds(currentChunkStartTime);\n  const videoUrl = `https://www.youtube.com/watch?v=${videoId}&t=${seconds}`;\n\n  chunks.push({\n      startTime: currentChunkStartTime,\n      text: currentChunkText.trim(),\n      url: videoUrl\n  });\n}\n\n// 7. RETURN WRAPPED OBJECT (for Split Out node)\nreturn { data: chunks };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        -208
+      ],
+      "id": "c74d2fc8-8a51-45e8-9539-ff5c53c42a27",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        464,
+        0
+      ],
+      "id": "d2a9b431-98a3-4a66-9c12-5ff556def865",
+      "name": "Embeddings Google Gemini",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "56ixfgjzaJ59H3aP",
+          "name": "Google Gemini(PaLM) Api AI_Team"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        384,
+        -208
+      ],
+      "id": "314cad88-b7f3-4a99-bee1-75c76f5c033f",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.textSplitterCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [
+        720,
+        208
+      ],
+      "id": "d0f1ffdd-ee2b-4bba-8e8e-d9c4e690ede9",
+      "name": "Character Text Splitter"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get many videos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many videos": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Default Data Loader": {
+      "ai_document": [
+        [
+          {
+            "node": "Supabase Vector Store",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings Google Gemini": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Supabase Vector Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Supabase Vector Store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Character Text Splitter": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Default Data Loader",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "093f7afe-f330-4668-aed1-af33fc3fb0da",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "630732af1935cbd61ce16267627985759dd14d24efdd8bb4891afbcd39eb47a1"
+  },
+  "nodeGroups": [],
+  "id": "WDVi7xx2j1wPf2Cd",
+  "tags": [
+    {
+      "updatedAt": "2025-09-03T09:27:51.536Z",
+      "createdAt": "2025-09-03T09:27:51.536Z",
+      "id": "0SxeJd80u5c8yGyf",
+      "name": "RAGHAD"
+    }
+  ]
+}
